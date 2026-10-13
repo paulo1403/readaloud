@@ -1,0 +1,71 @@
+use readaloud::doc;
+use readaloud::epub;
+
+/// Construye un `Book` en memoria: cada `&str` es el cuerpo de un capítulo.
+fn build_from_html(bodies: &[&str]) -> doc::Document {
+    let chapters = bodies
+        .iter()
+        .enumerate()
+        .map(|(i, body)| {
+            let xhtml =
+                format!(r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>"#);
+            epub::Chapter {
+                id: format!("c{i}"),
+                href: format!("c{i}.xhtml"),
+                media_type: "application/xhtml+xml".to_string(),
+                bytes: xhtml.into_bytes(),
+            }
+        })
+        .collect();
+    let book = epub::Book {
+        title: None,
+        author: None,
+        lang: None,
+        chapters,
+    };
+    doc::build(&book).expect("build del documento")
+}
+
+#[test]
+fn ids_contiguos_y_en_orden_de_lectura() {
+    let d = build_from_html(&["<p>Hola mundo</p><p>Otra frase</p>"]);
+    let ids: Vec<u32> = d.words().iter().map(|w| w.id).collect();
+    assert_eq!(ids, vec![0, 1, 2, 3]);
+    assert_eq!(d.words()[0].text, "Hola");
+    assert_eq!(d.words()[2].paragraph, 1);
+}
+
+#[test]
+fn decodifica_entidades_y_conserva_la_puntuacion() {
+    let d = build_from_html(&["<p>Pan &amp; vino, &#233;nfasis.</p>"]);
+    assert_eq!(d.words()[0].text, "Pan");
+    assert_eq!(d.words()[1].text, "&");
+    assert_eq!(d.words()[2].text, "vino,");
+}
+
+#[test]
+fn un_token_de_solo_puntuacion_no_es_palabra() {
+    let d = build_from_html(&["<p>Fin — luego</p>"]);
+    let textos: Vec<&str> = d.words().iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(textos, vec!["Fin", "luego"]);
+}
+
+#[test]
+fn xhtml_mal_formado_no_pierde_el_texto() {
+    let d = build_from_html(&["<p>Uno <b>dos<p>Tres"]);
+    assert!(d.words().len() >= 3);
+    assert_eq!(d.coverage_bad_xhtml, 1);
+}
+
+#[test]
+fn sin_espacios_no_rompe() {
+    let d = build_from_html(&["<p>这是一个没有空格的段落</p>"]);
+    assert_eq!(d.words().len(), 1);
+}
+
+#[test]
+fn capitulo_sin_texto_deja_la_secuencia_intacta() {
+    let d = build_from_html(&["<p>Antes</p>", "<img src=\"x.png\"/>", "<p>Después</p>"]);
+    let ids: Vec<u32> = d.words().iter().map(|w| w.id).collect();
+    assert_eq!(ids, vec![0, 1]);
+}
