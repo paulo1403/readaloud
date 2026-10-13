@@ -691,11 +691,18 @@ Expected: FAIL — `timeline` no existe
 
 Algoritmo fijado (el implementador no puede adivinarlo):
 
-1. **Recorrer el protocolo documentado** de `libpiper`: leer N codepoints repetidos de
-   `phonemes` hasta un `0`, luego los N siguientes de `phoneme_ids` y los N siguientes de
-   `alignments`. Avanzar los tres iteradores juntos.
-2. **Agrupar en palabras de fonemas:** un codepoint igual a espacio (`' '`, U+0020) cierra
-   grupo. Cada grupo acumula la suma de sus alineaciones.
+1. **Recorrer los tres arrays en paralelo (lockstep)**, no el protocolo de `0`s: el
+   `PhonemeChunk` ya viene aplanado (ver el contrato documentado en `src/tts/mod.rs`).
+   Recorrer `i` sobre `(phonemes[i], phoneme_ids[i], alignments[i])` a la vez, y:
+   - **excluir** el par BOS inicial (`phonemes[0]` = `'^'` con id 1, `phonemes[1]` = `'^'`
+     con id 0) y el `'$'` final (id 2, EOS);
+   - tener en cuenta que **cada fonema real aparece dos veces** (su id real y el id de pad
+     `0`), así que la duración de un fonema está partida entre dos entradas.
+2. **Agrupar en palabras de fonemas:** la frontera de palabra es una **tirada** de espacios
+   (`' '`, U+0020), no un espacio suelto — el fonema espacio también emite su entrada real y
+   su entrada de pad, o sea dos espacios seguidos. Cada grupo acumula la suma de **todas** sus
+   alineaciones, incluidas las de pad (filtrar los pad partiría cada duración por la mitad).
+   Invariante disponible para test: `sum(alignments) == samples.len()`.
 3. **Casar con `words` en orden.**
    - Mismo número de grupos que de palabras → cada palabra es `exact: true`, con
      `start_sample` acumulado y `end_sample = start + suma`.
