@@ -1,3 +1,5 @@
+pub mod script;
+
 use std::path::PathBuf;
 
 #[derive(clap::Parser)]
