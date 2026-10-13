@@ -1,19 +1,23 @@
 use readaloud::doc;
 use readaloud::epub;
 
-/// Construye un `Book` en memoria: cada `&str` es el cuerpo de un capítulo.
+/// Construye un `Book` en memoria: cada `&str` es el cuerpo de un capítulo, o un
+/// documento XHTML completo si ya trae un elemento `<html>` (p. ej. con DOCTYPE).
 fn build_from_html(bodies: &[&str]) -> doc::Document {
     let chapters = bodies
         .iter()
         .enumerate()
         .map(|(i, body)| {
-            let xhtml =
-                format!(r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>"#);
+            let bytes = if body.contains("<html") {
+                body.to_string()
+            } else {
+                format!(r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>"#)
+            };
             epub::Chapter {
                 id: format!("c{i}"),
                 href: format!("c{i}.xhtml"),
                 media_type: "application/xhtml+xml".to_string(),
-                bytes: xhtml.into_bytes(),
+                bytes: bytes.into_bytes(),
             }
         })
         .collect();
@@ -83,4 +87,13 @@ fn una_entidad_de_simbolo_es_palabra_pero_una_raya_suelta_no() {
     let d = build_from_html(&["<p>Pan &amp; vino — luego</p>"]);
     let textos: Vec<&str> = d.words().iter().map(|w| w.text.as_str()).collect();
     assert_eq!(textos, vec!["Pan", "&", "vino", "luego"]);
+}
+
+#[test]
+fn un_doctype_no_cuenta_como_xhtml_roto() {
+    let d =
+        build_from_html(&["<!DOCTYPE html><html><body><p>Con doctype y texto</p></body></html>"]);
+    assert_eq!(d.coverage_bad_xhtml, 0);
+    let textos: Vec<&str> = d.words().iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(textos, vec!["Con", "doctype", "y", "texto"]);
 }

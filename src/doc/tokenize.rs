@@ -25,7 +25,14 @@ pub(crate) struct Token {
 pub(crate) fn tokenize(bytes: &[u8]) -> (String, Vec<Token>, bool) {
     let raw = String::from_utf8_lossy(bytes);
     let xml = translate_html(&raw);
-    let (raw_text, valid) = match roxmltree::Document::parse(&xml) {
+    // `allow_dtd`: los EPUB reales empiezan con `<!DOCTYPE html>`. roxmltree no
+    // resuelve entidades externas (ni ficheros ni red), así que solo permite que
+    // el documento declare lo que ya trae; sin esto, el DOCTYPE tira al fallback.
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
+    let (raw_text, valid) = match roxmltree::Document::parse_with_options(&xml, options) {
         Ok(doc) => (extract(doc.root_element(), &xml), true),
         Err(_) => (strip_tags(&raw), false),
     };
