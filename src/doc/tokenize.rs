@@ -24,12 +24,55 @@ pub(crate) struct Token {
 /// etiquetas y se marca `valid = false`.
 pub(crate) fn tokenize(bytes: &[u8]) -> (String, Vec<Token>, bool) {
     let raw = String::from_utf8_lossy(bytes);
-    let (raw_text, valid) = match roxmltree::Document::parse(&raw) {
-        Ok(doc) => (extract(doc.root_element(), &raw), true),
+    let xml = translate_html(&raw);
+    let (raw_text, valid) = match roxmltree::Document::parse(&xml) {
+        Ok(doc) => (extract(doc.root_element(), &xml), true),
         Err(_) => (strip_tags(&raw), false),
     };
     let (text, tokens) = split(&raw_text);
     (text, tokens, valid)
+}
+
+/// Entidades HTML con nombre que XML no conoce y que el parser estricto
+/// rechazaría (declaradas en el DTD externo de XHTML, que no resolvemos).
+fn html_entity(name: &str) -> Option<char> {
+    Some(match name {
+        "nbsp" => '\u{a0}',
+        "mdash" => '\u{2014}',
+        "ndash" => '\u{2013}',
+        "hellip" => '\u{2026}',
+        "copy" => '\u{a9}',
+        "reg" => '\u{ae}',
+        "trade" => '\u{2122}',
+        "laquo" => '\u{ab}',
+        "raquo" => '\u{bb}',
+        "times" => '\u{d7}',
+        "middot" => '\u{b7}',
+        _ => return None,
+    })
+}
+
+/// Sustituye esas entidades por su carácter antes de parsear, para que un XHTML
+/// normal con `&nbsp;` siga el camino estricto y no cuente como roto. Lo que no
+/// reconoce (incluidas `&amp;` y las numéricas) se deja al parser.
+fn translate_html(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+        if let Some(semi) = rest.find(';')
+            && let Some(c) = html_entity(&rest[1..semi])
+        {
+            out.push(c);
+            rest = &rest[semi + 1..];
+            continue;
+        }
+        out.push('&');
+        rest = &rest[1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// ¿La etiqueta cierra párrafo?
@@ -180,8 +223,10 @@ fn decode_entity(e: &str) -> Option<char> {
         "gt" => Some('>'),
         "quot" => Some('"'),
         "apos" => Some('\''),
-        "nbsp" => Some('\u{a0}'),
         _ => {
+            if let Some(c) = html_entity(e) {
+                return Some(c);
+            }
             let code = if let Some(hex) = e.strip_prefix("#x").or_else(|| e.strip_prefix("#X")) {
                 u32::from_str_radix(hex, 16).ok()
             } else {
@@ -204,6 +249,12 @@ mod tests {
         );
         assert_eq!(decode_entities("&#x41;&#66;"), "AB");
         assert_eq!(decode_entities("suelto & x"), "suelto & x");
+    }
+
+    #[test]
+    fn traduce_entidades_html_antes_de_parsear() {
+        assert_eq!(translate_html("a&nbsp;b&mdash;c"), "a\u{a0}b\u{2014}c");
+        assert_eq!(translate_html("&amp; &#233;"), "&amp; &#233;");
     }
 
     #[test]

@@ -69,3 +69,18 @@ fn capitulo_sin_texto_deja_la_secuencia_intacta() {
     let ids: Vec<u32> = d.words().iter().map(|w| w.id).collect();
     assert_eq!(ids, vec![0, 1]);
 }
+
+#[test]
+fn una_entidad_html_comun_no_cuenta_como_xhtml_roto() {
+    let d = build_from_html(&["<p>Uno&nbsp;dos&nbsp;tres</p>"]);
+    assert_eq!(d.coverage_bad_xhtml, 0);
+    let textos: Vec<&str> = d.words().iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(textos, vec!["Uno", "dos", "tres"]);
+}
+
+#[test]
+fn una_entidad_de_simbolo_es_palabra_pero_una_raya_suelta_no() {
+    let d = build_from_html(&["<p>Pan &amp; vino — luego</p>"]);
+    let textos: Vec<&str> = d.words().iter().map(|w| w.text.as_str()).collect();
+    assert_eq!(textos, vec!["Pan", "&", "vino", "luego"]);
+}
