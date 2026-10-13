@@ -39,6 +39,12 @@ struct PiperAudioChunk {
 }
 
 unsafe extern "C" {
+    // AVISO: `piper_create` y `piper_synthesize_*` son C++ y pueden lanzar
+    // excepciones (JSON/ONNX corruptos, etc.). Dejar que una excepción C++
+    // cruce la frontera FFI es comportamiento indefinido (en la práctica,
+    // `abort`). Aquí se mitiga comprobando que el modelo y su `.onnx.json`
+    // existen antes de llamar; un endurecimiento futuro sería un shim C++ con
+    // `catch (...)` que devuelva un código de error en vez de excepcionar.
     fn piper_create(
         model_path: *const c_char,
         config_path: *const c_char,
@@ -297,6 +303,21 @@ mod tests {
         assert!(c.samples.len() > 0);
         assert_eq!(c.rate, 22050);
         assert_eq!(c.phonemes.len(), c.alignments.len());
+    }
+
+    /// El contrato documentado en `PhonemeChunk`: sumar todas las alineaciones
+    /// (rellenos incluidos) da el total de muestras. Si el aplanado cambiara,
+    /// esto lo detecta.
+    #[test]
+    fn las_alineaciones_suman_las_muestras() {
+        let Some(voz) = voz_de_test() else {
+            eprintln!("skip: define READALOUD_TEST_VOICE");
+            return;
+        };
+        let mut e = Engine::load(&voz).unwrap();
+        let c = e.synthesize("Hola mundo, esta es una frase de prueba.", 1.0).unwrap();
+        let total: i64 = c.alignments.iter().map(|&a| i64::from(a)).sum();
+        assert_eq!(total as usize, c.samples.len());
     }
 
     #[test]

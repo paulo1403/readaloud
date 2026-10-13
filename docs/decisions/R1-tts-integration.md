@@ -28,13 +28,24 @@ coincida con el protocolo documentado.
 1. Clona `https://github.com/OHF-Voice/piper1-gpl.git` en la etiqueta fijada
    **v1.8.0**, en `OUT_DIR` (no se vendoriza el C++: son ~3 MB de cabeceras
    *header-only* grandes y el CMake ya descarga lo demás).
-2. Ejecuta el CMake de `libpiper` con `CMAKE_BUILD_TYPE=Release`. Ese CMake, por
-   su cuenta, hace `ExternalProject` de **espeak-ng** (commit fijado
+2. Ejecuta el CMake de `libpiper` con `CMAKE_BUILD_TYPE=Release` **en un
+   directorio corto de scratch bajo `/tmp`** (`/tmp/ra-piper-<hash>`). Ese CMake,
+   por su cuenta, hace `ExternalProject` de **espeak-ng** (commit fijado
    `212928b3…`, compilado estático dentro de `libpiper.so`) y descarga
    **onnxruntime-linux-x64-1.22.0.tgz** prebuilt desde
-   `github.com/microsoft/onnxruntime/releases`.
-3. Enlaza con `-lpiper` y añade `-Wl,-rpath,<OUT_DIR>/lib` para que el binario
-   encuentre `libpiper.so` y `libonnxruntime.so.1` en tiempo de ejecución.
+   `github.com/microsoft/onnxruntime/releases`. El directorio corto no es un
+   capricho: el compilador de datos de espeak-ng usa un buffer de ruta fijo de
+   ~180 bytes y el `OUT_DIR` de cargo lo desborda (ver desviación 1).
+3. Copia `libpiper.so`, `libonnxruntime.so.1` y
+   `libonnxruntime_providers_shared.so` desde el scratch de `/tmp` a
+   `<OUT_DIR>/lib` (persistente, bajo `target/`) y **enlaza y pone el `rpath`
+   desde ahí**: `-lpiper` + `-Wl,-rpath,<OUT_DIR>/lib`. `/tmp` es tmpfs: enlazar
+   directamente contra él dejaría los binarios ya construidos sin sus `.so` tras
+   un reinicio. `libpiper.so` lleva `RUNPATH=$ORIGIN`, así que encuentra
+   `libonnxruntime.so.1`, que está a su lado. `build.rs` emite
+   `rerun-if-changed` sobre un marcador `.complete` dentro de `<OUT_DIR>/lib`:
+   si el directorio persistente desaparece (p. ej. `cargo clean`), el build
+   script se vuelve a ejecutar en lugar de enlazar contra rutas inexistentes.
 
 `cargo build` necesita por tanto **red y `git`**, y nada instalado por sudo.
 
@@ -75,17 +86,17 @@ funciona. La estrategia de velocidad del plan (§5, D9) queda validada.
 ### `ldd` del binario de test
 
 `libpiper.so` declara `DT_NEEDED libonnxruntime.so.1` y se le da un
-`RUNPATH` de `$ORIGIN` (los dos ficheros se instalan juntos), de modo que
-libpiper encuentra onnxruntime sin ruta absoluta. El binario de test añade un
-`RUNPATH` absoluto a `<dst>/lib` para encontrar `libpiper.so`:
+`RUNPATH` de `$ORIGIN` (los dos ficheros acaban juntos), de modo que libpiper
+encuentra onnxruntime sin ruta absoluta. El binario de test añade un `RUNPATH`
+absoluto a `<OUT_DIR>/lib` para encontrar `libpiper.so`:
 
 ```
-libpiper.so         => /tmp/ra-piper-<hash>/lib/libpiper.so
-libonnxruntime.so.1 => /tmp/ra-piper-<hash>/lib/libonnxruntime.so.1
+libpiper.so         => <OUT_DIR>/lib/libpiper.so
+libonnxruntime.so.1 => <OUT_DIR>/lib/libonnxruntime.so.1
 libpiper.so RUNPATH => $ORIGIN
 ```
 
-En `<dst>/lib` el `install` de libpiper deja:
+El `install` de libpiper deja en su scratch de `/tmp` (`<scratch>/lib`):
 
 ```
 libpiper.so
@@ -93,12 +104,26 @@ libonnxruntime.so -> libonnxruntime.so.1 -> libonnxruntime.so.1.22.0
 libonnxruntime_providers_shared.so
 ```
 
+de donde `build.rs` copia las tres que se necesitan a `<OUT_DIR>/lib`
+(`libonnxruntime.so.1` se copia resolviendo el symlink). Se comprobó con
+`readelf -d`: el `RUNPATH` del binario apunta a
+`…/target/debug/build/readaloud-<hash>/out/lib`, **no** a `/tmp`.
+
 ### Qué necesita en tiempo de ejecución
 
-- `libpiper.so` + `libonnxruntime.so.1` (ambas bajo `<dst>/lib`, resueltas por
-  `RUNPATH` en esta máquina; para un AppImage habría que empaquetarlas).
+- `libpiper.so` + `libonnxruntime.so.1` (ambas bajo `<OUT_DIR>/lib`, resueltas
+  por `RUNPATH`; para un AppImage habría que empaquetarlas).
 - Los datos de `espeak-ng` (`/usr/share/espeak-ng-data`, o
-  `READALOUD_ESPEAK_DATA`, o los que libpiper instala en `<dst>/share`).
+  `READALOUD_ESPEAK_DATA`, o los que libpiper instala en `<scratch>/share`).
+
+### Riesgo: excepciones C++ cruzando el FFI
+
+`piper_create` y `piper_synthesize_*` son C++ y **pueden lanzar excepciones**
+(JSON de la voz corrupto, ONNX inválido…). Dejar que una excepción C++ cruce la
+frontera `extern "C"` hacia Rust es **comportamiento indefinido** (en la
+práctica, `abort`). Mitigación actual: `Engine::load` comprueba que el `.onnx` y
+su `.onnx.json` existen antes de llamar. Endurecimiento futuro (no en este
+task): un shim C++ con `catch (...)` que traduzca a un código de error.
 
 ## Qué necesitaría una máquina limpia
 
@@ -113,12 +138,20 @@ libonnxruntime_providers_shared.so
 ## Desviaciones respecto al plan (anotadas)
 
 1. **El compilador de datos de espeak-ng trunca rutas.** Usa un buffer fijo de
-   ~180 bytes; el `OUT_DIR` de cargo (`…/target/debug/build/readaloud-<hash>/out`)
-   lo desborda, truncando los nombres de `phsource` y abortando el build con
-   *Bad vowel file*. Por eso `build.rs` construye el CMake en un directorio corto
-   en `/tmp` (`/tmp/ra-piper-<hash>`), derivado del `OUT_DIR`. Es un
-   `ponytail:`-style workaround; cuando espeak-ng arregle el buffer se puede
-   volver a construir dentro de `OUT_DIR`.
+   ~180 bytes; el `OUT_DIR` de cargo
+   (`…/target/debug/build/readaloud-<hash>/out`, ~94 chars de prefijo) lo
+   desborda, truncando los nombres de `phsource` y abortando el build con *Bad
+   vowel file*. Por eso el CMake se construye en un directorio corto de scratch
+   en `/tmp` (`/tmp/ra-piper-<hash>`). **Consecuencia real de `/tmp`:** es tmpfs;
+   tras un reinicio desaparece, `target/` sobrevive y el build script no se
+   re-ejecuta, así que cualquier ruta en `/tmp` (link search path, `-rpath`)
+   quedaría rota y los binarios ya construidos no arrancarían. **Resolución:**
+   las `.so` se copian a `<OUT_DIR>/lib` (persistente bajo `target/`) y el enlace
+   y el `rpath` apuntan ahí; `/tmp` es solo scratch de compilación, con un
+   `rerun-if-changed` sobre un marcador persistente para forzar rebuild si ese
+   directorio falta. Verificado borrando `/tmp/ra-piper-*`: el binario ya
+   construido sigue arrancando y los tests pasan. Cuando espeak-ng arregle su
+   buffer, el CMake podrá construirse dentro de `OUT_DIR` y la copia sobrará.
 2. **La voz de test no trae alineación.** `es_ES-davefx-medium.onnx` solo tiene
    una salida (`output`); sin `w_ceil` expuesta, `libpiper` devuelve
    `num_alignments = 0` mientras `num_phonemes > 0`, y el test
@@ -128,14 +161,19 @@ libonnxruntime_providers_shared.so
    original nunca se modifica. La Task 6 (`voices prepare`) hará el parche
    persistente sobre la voz del usuario; aquí basta con que el motor sea
    autosuficiente.
-3. **Semántica de `PhonemeChunk`.** Los tres arrays (`phonemes`,
-   `phoneme_ids`, `alignments`) son **paralelos, un elemento por id de fonema**,
-   de modo que `phonemes[i]` corresponde a `phoneme_ids[i]` y `alignments[i]`.
-   Los separadores internos de la API C (codepoint `0`) se eliminan; los límites
-   de palabra quedan visibles como `' '`. Esto hace que las tres longitudes
-   coincidan y da a `timeline/` (Task 7) una proyección directa y sin pérdida.
-   El algoritmo del Task 7 descrito en el plan (leer hasta un `0`) hay que
-   adaptarlo a esta costura: agrupar por `' '` y sumar `alignments`.
+3. **Semántica de `PhonemeChunk`.** El contrato completo está documentado en
+   `src/tts/mod.rs` (struct `PhonemeChunk`). En resumen: `phonemes`,
+   `phoneme_ids` y `alignments` son **arrays paralelos de la misma longitud**, un
+   elemento por id de fonema del modelo; los separadores internos de la API C
+   (codepoint `0`) se eliminan. Cada fonema real aparece **dos veces** (su id de
+   modelo + el id de relleno `0`), el flujo va enmarcado por `'^'`/`'^'` (BOS y
+   su relleno) al principio y `'$'` (EOS) al final, y el límite de palabra es una
+   **tirada** de `' '` (el espacio emite dos entradas). Invariante:
+   `sum(alignments) == samples.len()`, fijada por un test. El algoritmo del
+   Task 7 descrito en el plan (leer hasta un `0`) hay que adaptarlo a esta
+   costura: recorrer los tres arrays en lockstep, saltar el par de BOS y el EOS,
+   delimitar palabras por tiradas de `' '` y sumar **todas** las alineaciones de
+   cada grupo (incluidos los rellenos).
 
 ## Coste de construcción (medido)
 
