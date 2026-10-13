@@ -16,6 +16,19 @@ mismos datos que el subcomando `script`.
 
 **Spec:** `docs/superpowers/specs/2026-10-13-readaloud-design.md`
 
+## Prerequisites
+
+Comprobado en la máquina del autor. Antes del task 1:
+
+- **Toolchain de Rust asignada.** `cargo` y `rustc` son shims de mise sin versión fijada
+  (`mise ERROR No version is set for shim: cargo`). Ejecutar `mise use -g rust@1.98.0` (o la
+  última estable) y confirmar con `cargo --version`. Sin esto, el task 1 falla por un error
+  de mise, no de Rust.
+- **Una voz para los tests con puerta.** Los tasks 5, 6, 8 y 11 se saltan (con `skip:`) si no
+  existe `READALOUD_TEST_VOICE`. Exportar la ruta a un `.onnx`, por ejemplo el que ya está en
+  la máquina: `export READALOUD_TEST_VOICE=~/.local/share/piper-voices/es_ES-davefx-medium.onnx`.
+- Ya presentes: `pkg-config`, `cmake`, `c++` (`/usr/bin/c++`).
+
 ## Global Constraints
 
 Requisitos que aplican a **todas** las tareas. Valores copiados de la spec.
