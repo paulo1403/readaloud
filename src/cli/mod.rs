@@ -34,6 +34,9 @@ pub struct SayArgs {
     pub out: Option<PathBuf>,
     #[arg(long, default_value = "1.0")]
     pub length_scale: f32,
+    /// Nombre de la voz (sin `.onnx`). Por defecto, la primera descubierta.
+    #[arg(long)]
+    pub voice: Option<String>,
 }
 
 #[derive(clap::Args)]
@@ -86,5 +89,16 @@ mod tests {
     #[test]
     fn la_cli_es_bien_formada() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn say_acepta_una_voz_y_la_usa() {
+        let cli = Cli::parse_from(["readaloud", "say", "hola", "--voice", "es_ES-davefx-medium"]);
+        let Command::Say(args) = cli.command else {
+            panic!("esperaba el subcomando say");
+        };
+        assert_eq!(args.voice.as_deref(), Some("es_ES-davefx-medium"));
+        // Una voz inexistente no cae en "la primera": `run` la busca por nombre.
+        assert!(crate::cli::say::run("hola", None, 1.0, Some("voz-inexistente")).is_err());
     }
 }

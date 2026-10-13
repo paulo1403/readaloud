@@ -5,16 +5,27 @@ use std::path::Path;
 use crate::tts::{Engine, TtsError, voices};
 use crate::wav;
 
-/// Sintetiza `text` con la primera voz disponible y escribe el WAV en `out`,
-/// o en stdout si `out` es `None`.
-pub fn run(text: &str, out: Option<&Path>, length_scale: f32) -> anyhow::Result<()> {
+/// Sintetiza `text` y escribe el WAV en `out`, o en stdout si `out` es `None`.
+///
+/// `voice` es el nombre de la voz (sin `.onnx`); si es `None`, se usa la primera
+/// descubierta en `voices::default_dir()`.
+pub fn run(
+    text: &str,
+    out: Option<&Path>,
+    length_scale: f32,
+    voice: Option<&str>,
+) -> anyhow::Result<()> {
     let dir = voices::default_dir();
-    let voice = voices::discover(&dir)
-        .into_iter()
-        .next()
-        .ok_or(TtsError::VoiceNotFound)?;
+    let available = voices::discover(&dir);
+    let chosen = match voice {
+        Some(name) => available
+            .iter()
+            .find(|v| v.name == name)
+            .ok_or(TtsError::VoiceNotFound)?,
+        None => available.first().ok_or(TtsError::VoiceNotFound)?,
+    };
 
-    let mut engine = Engine::load(&voice.onnx)?;
+    let mut engine = Engine::load(&chosen.onnx)?;
     let chunk = engine.synthesize(text, length_scale)?;
 
     match out {

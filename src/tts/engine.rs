@@ -7,10 +7,39 @@ use std::ffi::{CString, c_char, c_int, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::{Mutex, MutexGuard};
 
 use onnx_protobuf::{Message, ModelProto};
 
 use super::{PhonemeChunk, TtsError, alignment, config_path};
+
+/// Lock global de `libpiper`.
+///
+/// `libpiper` mantiene estado **global de proceso**, no thread-safe y además no
+/// reentrante entre motores:
+/// - un `static Ort::Env` creado en el primer `piper_create` (`piper.cpp:32`);
+/// - espeak-ng, que `piper_create` inicializa (`espeak_Initialize`) y
+///   `piper_synthesize_start` usa para fonemizar (`espeak_SetVoiceByName`), y
+///   **que `piper_free` termina** (`espeak_Terminate`, `piper.cpp:301`).
+///
+/// Por ese `espeak_Terminate` no basta con serializar las llamadas: si un motor
+/// se libera mientras otro vive, espeak queda apagado y el siguiente
+/// `espeak_SetVoiceByName` del superviviente hace segfault (medido: dentro de
+/// `LoadVoice`/`LoadLanguageOptions`). Además, dos llamadas concurrentes
+/// corrompen el heap (SIGSEGV, o SIGABRT «double free or corruption»). Por eso
+/// el lock se mantiene **toda la vida del `Engine`**: `load` lo toma y el motor
+/// lo suelta al caer, de modo que nunca hay dos motores vivos ni llamadas
+/// solapadas.
+///
+/// ponytail: un motor por proceso. El techo es que dos voces no cargan ni
+/// sintetizan en paralelo (irrelevante hoy: `say`/`play` usan una voz por
+/// proceso y el precache es de un solo hilo). Para paralelizar hará falta un
+/// libpiper que no termine espeak en cada `piper_free` (o un fonemizador
+/// thread-safe); entonces este lock se puede relajar a uno por motor.
+fn ffi_lock() -> MutexGuard<'static, ()> {
+    static FFI: Mutex<()> = Mutex::new(());
+    FFI.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // De piper.h.
 const PIPER_OK: c_int = 0;
@@ -61,14 +90,19 @@ unsafe extern "C" {
 }
 
 /// Motor piper para una voz concreta.
+///
+/// Retiene el lock global de `libpiper` mientras vive: solo puede existir un
+/// `Engine` a la vez en todo el proceso (ver `ffi_lock`).
 pub struct Engine {
     synth: *mut c_void,
+    _ffi: MutexGuard<'static, ()>,
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
         if !self.synth.is_null() {
-            // piper_free ya comprueba el nulo, pero no delegamos en eso.
+            // piper_free ya comprueba el nulo, pero no delegamos en eso. Corre
+            // bajo `_ffi`, que se libera al soltar el struct (después de esto).
             unsafe { piper_free(self.synth) };
             self.synth = ptr::null_mut();
         }
@@ -89,6 +123,11 @@ impl Engine {
             return Err(TtsError::VoiceNotFound);
         }
 
+        // `piper_create` inicializa el `static Ort::Env` y espeak-ng (globales).
+        // El lock se queda dentro del `Engine`: cubre también el parche temporal
+        // de `ensure_alignment_output` y garantiza que no haya dos motores vivos
+        // (piper_free termina espeak-ng, que es un singleton de proceso).
+        let ffi = ffi_lock();
         let model = ensure_alignment_output(voice_onnx)?;
         let c_model = cstring(&model)?;
         let c_config = cstring(&config)?;
@@ -104,7 +143,7 @@ impl Engine {
         if synth.is_null() {
             return Err(TtsError::Engine);
         }
-        Ok(Engine { synth })
+        Ok(Engine { synth, _ffi: ffi })
     }
 
     /// Sintetiza `text` a PCM mono con la alineación por fonema.
@@ -117,6 +156,8 @@ impl Engine {
         }
         let c_text = CString::new(text).map_err(|_| TtsError::Synth)?;
 
+        // Ya tenemos el lock global en `self._ffi`: nadie más puede estar en
+        // libpiper mientras este motor vive.
         let mut options = unsafe { piper_default_synthesize_options(self.synth) };
         options.length_scale = length_scale;
 
@@ -290,5 +331,46 @@ mod tests {
             Engine::load(Path::new("/no/existe/voz.onnx")),
             Err(TtsError::VoiceNotFound)
         ));
+    }
+
+    /// Varios motores en hilos distintos, cargando/sintetizando/librando a la vez.
+    ///
+    /// `libpiper` no es thread-safe (estado global de espeak-ng y un `static
+    /// Ort::Env`), así que sin serializar esto hace segfault de forma
+    /// intermitente. El test no debe caerse nunca.
+    #[test]
+    fn dos_motores_en_paralelo_no_segfaultean() {
+        use std::sync::{Arc, Barrier};
+
+        let Some(voz) = voz_de_test() else {
+            eprintln!("skip: define READALOUD_TEST_VOICE");
+            return;
+        };
+        const HILOS: usize = 4;
+        let barrera = Arc::new(Barrier::new(HILOS));
+        let handles: Vec<_> = (0..HILOS)
+            .map(|_| {
+                let voz = voz.clone();
+                let barrera = Arc::clone(&barrera);
+                std::thread::spawn(move || {
+                    // Todas arrancan a la vez: maximiza el solape de las llamadas.
+                    barrera.wait();
+                    let mut total = 0usize;
+                    for _ in 0..3 {
+                        let mut engine = Engine::load(&voz).unwrap();
+                        for texto in ["Hola mundo.", "Esta es una prueba."] {
+                            let chunk = engine.synthesize(texto, 1.0).unwrap();
+                            assert!(!chunk.samples.is_empty());
+                            total += chunk.samples.len();
+                        }
+                        // `engine` se libera aquí: también compite `piper_free`.
+                    }
+                    total
+                })
+            })
+            .collect();
+        for handle in handles {
+            assert!(handle.join().unwrap() > 0);
+        }
     }
 }

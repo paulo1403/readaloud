@@ -55,7 +55,7 @@ fn prepare_marca_el_tensor_de_alineacion() {
 fn say_escribe_un_wav_no_vacio() {
     let Some(_) = test_voice() else { return };
     let out = tempfile();
-    cli::say::run("Hola mundo.", Some(&out), 1.0).unwrap();
+    cli::say::run("Hola mundo.", Some(&out), 1.0, None).unwrap();
     assert!(std::fs::metadata(&out).unwrap().len() > 44);
     let _ = std::fs::remove_file(&out);
 }

@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
             &args.text,
             args.out.as_deref(),
             args.length_scale,
+            args.voice.as_deref(),
         ),
         Command::Voices(args) => match args.cmd {
             readaloud::cli::VoicesCmd::List { dir } => {
