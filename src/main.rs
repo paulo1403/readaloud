@@ -11,8 +11,19 @@ fn main() -> anyhow::Result<()> {
             print!("{}", readaloud::cli::script::run_text(&args.path)?);
             Ok(())
         }
-        Command::Say(_) => anyhow::bail!("no implementado"),
-        Command::Voices(_) => anyhow::bail!("no implementado"),
+        Command::Say(args) => readaloud::cli::say::run(
+            &args.text,
+            args.out.as_deref(),
+            args.length_scale,
+        ),
+        Command::Voices(args) => match args.cmd {
+            readaloud::cli::VoicesCmd::List { dir } => {
+                readaloud::cli::voices::list(dir.as_deref())
+            }
+            readaloud::cli::VoicesCmd::Prepare { name, dir } => {
+                readaloud::cli::voices::prepare(dir.as_deref(), &name)
+            }
+        },
         Command::Play(_) => anyhow::bail!("no implementado"),
     }
 }

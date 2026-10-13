@@ -8,9 +8,9 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use onnx_protobuf::{Message, ModelProto, ValueInfoProto};
+use onnx_protobuf::{Message, ModelProto};
 
-use super::{PhonemeChunk, TtsError};
+use super::{PhonemeChunk, TtsError, alignment, config_path};
 
 // De piper.h.
 const PIPER_OK: c_int = 0;
@@ -189,12 +189,6 @@ impl Engine {
     }
 }
 
-fn config_path(voice_onnx: &Path) -> PathBuf {
-    let mut name = voice_onnx.as_os_str().to_os_string();
-    name.push(".json");
-    PathBuf::from(name)
-}
-
 fn cstring(path: &Path) -> Result<CString, TtsError> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| TtsError::Engine)
 }
@@ -225,46 +219,16 @@ fn ensure_alignment_output(onnx: &Path) -> Result<PathBuf, TtsError> {
     let bytes = std::fs::read(onnx).map_err(|_| TtsError::VoiceNotFound)?;
     let mut model = ModelProto::parse_from_bytes(&bytes).map_err(|_| TtsError::Engine)?;
 
-    let Some(ceil) = ceil_output_name(&model) else {
-        return Ok(onnx.to_path_buf());
-    };
-    let already = model
-        .graph
-        .as_ref()
-        .is_some_and(|g| g.output.iter().any(|o| o.name == ceil));
-    if already {
+    if !alignment::add_alignment_output(&mut model) {
         return Ok(onnx.to_path_buf());
     }
 
     let patched = patched_path(onnx);
     if !patched.exists() {
-        let mut info = ValueInfoProto::new();
-        info.name = ceil;
-        model
-            .graph
-            .as_mut()
-            .ok_or(TtsError::Engine)?
-            .output
-            .push(info);
         let out = model.write_to_bytes().map_err(|_| TtsError::Engine)?;
         std::fs::write(&patched, out).map_err(|_| TtsError::Engine)?;
     }
     Ok(patched)
-}
-
-/// Nombre de la salida del nodo `Ceil` (`w_ceil`) que da las alineaciones.
-fn ceil_output_name(model: &ModelProto) -> Option<String> {
-    let graph = model.graph.as_ref()?;
-    for node in &graph.node {
-        if node.op_type == "Ceil" {
-            for name in &node.output {
-                if !name.is_empty() {
-                    return Some(name.clone());
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Ruta cacheada del modelo parcheado, derivada de la ruta y tamaño originales.

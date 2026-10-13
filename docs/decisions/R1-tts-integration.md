@@ -183,3 +183,22 @@ task): un shim C++ con `catch (...)` que traduzca a un código de error.
 - `cargo build --release` en frío (perfil nuevo, espeak-ng + libpiper + todo):
   **3m16s**. Sin red no construye.
 - Rebuild incremental tras tocar `build.rs` (solo relink): segundos.
+
+## Actualización — Task 6 (registro de voces y parche persistente)
+
+Lo que añade el Task 6 a esta decisión (nada de lo medido arriba cambia):
+
+- **Una sola implementación del parche ONNX.** La edición del grafo que expone
+  `w_ceil` (buscar el nodo `Ceil` y añadir su salida a `graph.output`) vive
+  ahora en `src/tts/alignment.rs` y la comparten `Engine::load` (copia temporal
+  para voces sin preparar) y `voices::prepare` (parche persistente sobre el
+  fichero de la voz). Antes estaba duplicada en `engine.rs`.
+- **`prepare` es persistente e idempotente.** Escribe el parche en el `.onnx`
+  del usuario; `voices::is_prepared(onnx)` (parsea el grafo y comprueba si
+  `graph.output` ya contiene la salida de `Ceil`) lo hace idempotente: una voz
+  ya parcheada no se reescribe. El fichero temporal de `Engine::load` se
+  mantiene como red de seguridad para voces aún no preparadas.
+- **La voz de test `es_ES-davefx-medium.onnx` tiene un nodo `Ceil`** cuya salida
+  no está expuesta, que es lo que permite parchearla. Una voz sin nodo `Ceil` no
+  se puede preparar: `is_prepared` devuelve `false` y `prepare` es un no-op
+  (documentado, no un error).

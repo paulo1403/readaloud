@@ -6,8 +6,20 @@
 //! La semántica exacta de los vectores de `PhonemeChunk` está documentada en
 //! el propio struct: es el contrato que consume `timeline/`.
 
+mod alignment;
 mod engine;
+pub mod voices;
+
 pub use engine::Engine;
+
+use std::path::{Path, PathBuf};
+
+/// Ruta del `.onnx.json` hermano de una voz `.onnx`.
+pub(crate) fn config_path(onnx: &Path) -> PathBuf {
+    let mut name = onnx.as_os_str().to_os_string();
+    name.push(".json");
+    PathBuf::from(name)
+}
 
 /// Trozo de audio con su alineación por fonema.
 ///
