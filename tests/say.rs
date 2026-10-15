@@ -6,12 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use readaloud::test_support::test_voice;
 use readaloud::{cli, tts::voices, wav};
-
-/// Voz de test con puerta.
-fn test_voice() -> Option<PathBuf> {
-    std::env::var("READALOUD_TEST_VOICE").ok().map(Into::into)
-}
 
 /// `say` lee `voices::default_dir()`, no `READALOUD_TEST_VOICE`: el test de `say`
 /// se salta si ese directorio no tiene voces, para que la puerta y la búsqueda

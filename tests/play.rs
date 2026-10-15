@@ -12,12 +12,8 @@ use std::sync::atomic::AtomicUsize;
 
 use readaloud::cli::play;
 use readaloud::player::{NullSink, PlayerState};
+use readaloud::test_support::test_voice;
 use tempfile::tempdir;
-
-/// Voz piper para los tests que sintetizan; `None` (skip) si no está definida.
-fn test_voice() -> Option<PathBuf> {
-    std::env::var("READALOUD_TEST_VOICE").ok().map(Into::into)
-}
 
 /// Ficheros escritos en la caché (`.pcm` + `.json` por entrada).
 fn count_entries(dir: &Path) -> usize {

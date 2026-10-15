@@ -302,14 +302,9 @@ fn patched_path(onnx: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    fn voz_de_test() -> Option<PathBuf> {
-        // Los tests de integración no deben exigir modelos de 60 MB en disco.
-        std::env::var("READALOUD_TEST_VOICE").ok().map(Into::into)
-    }
-
     #[test]
     fn sintetiza_una_frase_y_devuelve_fonemas() {
-        let Some(voz) = voz_de_test() else {
+        let Some(voz) = crate::test_support::test_voice() else {
             eprintln!("skip: define READALOUD_TEST_VOICE");
             return;
         };
@@ -325,7 +320,7 @@ mod tests {
     /// esto lo detecta.
     #[test]
     fn las_alineaciones_suman_las_muestras() {
-        let Some(voz) = voz_de_test() else {
+        let Some(voz) = crate::test_support::test_voice() else {
             eprintln!("skip: define READALOUD_TEST_VOICE");
             return;
         };
@@ -352,7 +347,7 @@ mod tests {
     fn dos_motores_en_paralelo_no_segfaultean() {
         use std::sync::{Arc, Barrier};
 
-        let Some(voz) = voz_de_test() else {
+        let Some(voz) = crate::test_support::test_voice() else {
             eprintln!("skip: define READALOUD_TEST_VOICE");
             return;
         };
