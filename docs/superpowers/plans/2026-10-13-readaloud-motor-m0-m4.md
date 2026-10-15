@@ -1003,8 +1003,10 @@ Expected: 2 tests PASS
 - [ ] **Step 5: Verificación manual (M4)**
 
 Run: `cargo run -- play <tu-epub> --voice es_ES-davefx-medium`
-Expected: se oye el libro en voz alta; con `--length-scale 1.3` va más rápido sin cambiar el
-tono; Ctrl-C corta limpio.
+Expected: se oye el libro en voz alta a velocidad normal y sin cambio de tono; con
+`--length-scale 0.77` va **más rápido** sin subir el tono (`length_scale` de piper escala
+duración: **>1 es más lento, <1 es más rápido** — la formulación anterior de este paso estaba
+invertida y el implementador la corrigió midiendo); Ctrl-C corta limpio.
 
 - [ ] **Step 6: Commit**
 
