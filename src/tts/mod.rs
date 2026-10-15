@@ -7,6 +7,7 @@
 //! el propio struct: es el contrato que consume `timeline/`.
 
 mod alignment;
+pub mod cache;
 mod engine;
 pub mod voices;
 
@@ -51,7 +52,7 @@ pub(crate) fn config_path(onnx: &Path) -> PathBuf {
 ///
 /// Ejemplo (`"Hola mundo."`, recortado): `phonemes = ['^','^','ˈ','ˈ','o','o',
 /// …,' ',' ','m','m',…,'$']`, con los rellenos (`id 0`) intercalados.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PhonemeChunk {
     /// Muestras PCM mono a 16 bits.
     pub samples: Vec<i16>,
