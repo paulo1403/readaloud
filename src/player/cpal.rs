@@ -40,6 +40,7 @@ impl CpalSink {
         let configs: Vec<_> = device
             .supported_output_configs()
             .map_err(|_| PlayerError::Config)?
+            .filter(|c| soportado(c.sample_format()))
             .collect();
         let rangos: Vec<(u32, u32)> = configs
             .iter()
@@ -72,6 +73,20 @@ impl CpalSink {
             _stream: stream,
         })
     }
+}
+
+/// ¿`construir` sabe abrir un stream en este formato?
+///
+/// El dispositivo anuncia muchos formatos (`U8`, `I24`, `I32`…) en el mismo
+/// rango de tasas y `supported_output_configs` no los ordena por calidad: el
+/// primero puede ser `U8`. Elegir a ciegas abriría un stream de 8 bits o, peor,
+/// un formato que `construir` no sabe rellenar (→ [`PlayerError::Config`]).
+/// Sólo se consideran los formatos que el sink soporta de verdad.
+fn soportado(format: SampleFormat) -> bool {
+    matches!(
+        format,
+        SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16
+    )
 }
 
 /// Índice del primer rango `(min, max)` que contiene `rate`, o `None`.
@@ -153,5 +168,18 @@ mod tests {
         assert_eq!(elegir(&[(44100, 48000)], 44100), Some(0));
         // Varios rangos: gana el primero que contiene la tasa.
         assert_eq!(elegir(&[(44100, 48000), (22050, 22050)], 22050), Some(1));
+    }
+
+    /// El dispositivo anuncia `U8`, `I24`, `I32`… al mismo rango: sólo valen los
+    /// formatos que `construir` sabe rellenar. Sin este filtro, el `U8` que ALSA
+    /// lista primero rompía `CpalSink::new` con `PlayerError::Config`.
+    #[test]
+    fn solo_se_consideran_los_formatos_soportados() {
+        assert!(soportado(SampleFormat::F32));
+        assert!(soportado(SampleFormat::I16));
+        assert!(soportado(SampleFormat::U16));
+        assert!(!soportado(SampleFormat::U8));
+        assert!(!soportado(SampleFormat::I24));
+        assert!(!soportado(SampleFormat::I32));
     }
 }
