@@ -23,7 +23,7 @@ use crate::doc::Word;
 use crate::tts::PhonemeChunk;
 
 /// Rango de samples `[start_sample, end_sample)` de una palabra.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct Span {
     pub word_id: u32,
     pub start_sample: usize,

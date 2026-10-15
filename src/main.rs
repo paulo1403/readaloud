@@ -6,9 +6,20 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Script(args) => {
             if args.timeline {
-                anyhow::bail!("no implementado")
+                let voices =
+                    readaloud::tts::voices::discover(&readaloud::tts::voices::default_dir());
+                let Some(voz) = voices.first() else {
+                    anyhow::bail!(
+                        "no hay voces instaladas; ejecuta `readaloud voices prepare <nombre>`"
+                    );
+                };
+                print!(
+                    "{}",
+                    readaloud::cli::script::run_timeline(&args.path, &voz.onnx)?
+                );
+            } else {
+                print!("{}", readaloud::cli::script::run_text(&args.path)?);
             }
-            print!("{}", readaloud::cli::script::run_text(&args.path)?);
             Ok(())
         }
         Command::Say(args) => readaloud::cli::say::run(
