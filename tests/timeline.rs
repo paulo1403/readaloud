@@ -124,6 +124,39 @@ fn chunk_con_expansion_en_medio() -> PhonemeChunk {
     )
 }
 
+/// Igual que `chunk_de_dos_palabras`, pero el `'$'` (EOS) lleva una alineación
+/// de 10: el silencio final. `samples.len() == 70 + 10 = 80`.
+fn chunk_con_silencio_final() -> PhonemeChunk {
+    chunk(
+        &[
+            ('^', 1, 0),
+            ('^', 0, 0),
+            ('a', 10, 10),
+            ('a', 0, 10),
+            ('b', 11, 5),
+            ('b', 0, 0),
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('c', 12, 20),
+            ('c', 0, 20),
+            ('d', 13, 5),
+            ('d', 0, 0),
+            ('$', 2, 10), // silencio final
+        ],
+        80,
+    )
+}
+
+#[test]
+fn el_silencio_final_del_eos_no_pertenece_a_la_ultima_palabra() {
+    let words = palabras(&["uno", "dos"]);
+    let t = build(&chunk_con_silencio_final(), &words);
+    let ultimo = t.spans.last().unwrap();
+    assert_eq!(ultimo.end_sample, 70, "el silencio del EOS no se cuenta");
+    assert_eq!(t.word_at(70), None, "durante el silencio final no hay palabra");
+    assert_eq!(t.word_at(69), Some(1));
+}
+
 #[test]
 fn rangos_exactos_por_palabra() {
     let t = build(&chunk_de_dos_palabras(), &palabras(&["uno", "dos"]));
@@ -167,6 +200,10 @@ fn expansion_en_medio_no_deja_palabras_exactas() {
     }
     // y el ultimo no se pasa del total
     assert!(t.spans.last().unwrap().end_sample <= 70);
+    // cobertura: cada word_id aparece exactamente una vez
+    let mut ids: Vec<u32> = t.spans.iter().map(|s| s.word_id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![0, 1, 2, 3], "cada palabra una vez, ninguna perdida");
 }
 
 #[test]

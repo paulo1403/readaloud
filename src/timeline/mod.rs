@@ -66,13 +66,16 @@ fn grupos(phonemes: &[char], alignments: &[i32]) -> Vec<(usize, usize)> {
     let mut abierto: Option<usize> = None;
     for (i, &ph) in phonemes.iter().enumerate() {
         let a = alignments.get(i).copied().unwrap_or(0).max(0) as usize;
-        if ph == '^' || ph == '$' {
-            acc += a; // BOS/EOS: no abren grupo
-        } else if ph == ' ' {
+        if ph == ' ' || ph == '$' {
+            // Frontera: cierra el grupo abierto ANTES de sumar la pausa, para
+            // que el silencio de la frontera (y el del EOS) quede fuera de todo
+            // span y `word_at` devuelva `None` ahí.
             if let Some(s) = abierto.take() {
                 out.push((s, acc));
             }
             acc += a;
+        } else if ph == '^' {
+            acc += a; // BOS: no abre grupo (silencio de cabecera = hueco)
         } else {
             abierto.get_or_insert(acc);
             acc += a;
