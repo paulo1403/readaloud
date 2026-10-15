@@ -19,6 +19,22 @@ use super::script;
 /// Cada cuánto se sondea el reproductor mientras suena una frase.
 const POLL: Duration = Duration::from_millis(10);
 
+/// Sondeos consecutivos sin que avance la posición antes de dar el dispositivo
+/// por muerto. Un stream estancado (dispositivo desconectado, callback muerto)
+/// dejaría el bucle devolviendo `Playing` para siempre; esto lo corta con un
+/// error legible. `READALOUD_STALL_POLLS` lo baja en los tests.
+const STALL_POLLS: u64 = 300;
+
+/// Tope de estancamiento activo: el del entorno si es un entero > 0, si no el
+/// [`STALL_POLLS`] por defecto.
+fn stall_polls() -> u64 {
+    std::env::var("READALOUD_STALL_POLLS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(STALL_POLLS)
+}
+
 /// Resumen de una lectura: frases sonadas, palabras cubiertas y estado final.
 #[derive(Debug)]
 pub struct PlaySummary {
@@ -83,6 +99,11 @@ pub fn run_with_in(
     let mut ends: Vec<usize> = Vec::new();
     let mut enqueued_samples = 0usize;
     let mut finished = 0usize;
+    // Vigilancia de estancamiento: si `position_sample` no crece en `stall`
+    // sondeos seguidos, el stream está muerto y se aborta con un error.
+    let stall = stall_polls();
+    let mut last_pos = 0usize;
+    let mut stalled = 0u64;
     let mut final_state;
 
     loop {
@@ -124,6 +145,18 @@ pub fn run_with_in(
         while finished < ends.len() && pos >= ends[finished] {
             finished += 1;
         }
+        if pos > last_pos {
+            last_pos = pos;
+            stalled = 0;
+        } else {
+            stalled += 1;
+            if stalled >= stall {
+                anyhow::bail!(
+                    "el dispositivo de audio no avanza: {pos} samples sonados sin cambio \
+                     en {stall} sondeos; comprueba que el dispositivo de salida sigue conectado"
+                );
+            }
+        }
 
         std::thread::sleep(POLL);
     }
@@ -138,7 +171,8 @@ pub fn run_with_in(
 /// Lee `path` en voz alta con la voz `voice` (por nombre), abriendo el
 /// dispositivo de salida por defecto a la tasa del motor.
 pub fn run(path: &Path, voice: &str, length_scale: f32) -> anyhow::Result<()> {
-    let chosen = super::say::select(&voices::default_dir(), Some(voice))?;
+    let chosen = super::say::select(&voices::default_dir(), Some(voice))
+        .map_err(|_| anyhow::anyhow!("voz no encontrada: {voice}"))?;
     let sink = CpalSink::new(voice_rate(&chosen.onnx)?)?;
     run_with_in(
         path,

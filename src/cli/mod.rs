@@ -64,6 +64,8 @@ pub struct PlayArgs {
     pub path: PathBuf,
     #[arg(long)]
     pub voice: String,
+    /// Escala de duración de la voz: por debajo de 1 habla más rápido y por
+    /// encima de 1 más despacio (1.3 = más lento); no cambia el tono.
     #[arg(long, default_value = "1.0")]
     pub length_scale: f32,
     #[arg(long, hide = true)]
