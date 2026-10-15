@@ -706,9 +706,10 @@ Algoritmo fijado (el implementador no puede adivinarlo):
 3. **Casar con `words` en orden.**
    - Mismo número de grupos que de palabras → cada palabra es `exact: true`, con
      `start_sample` acumulado y `end_sample = start + suma`.
-   - Números distintos → casar el prefijo mientras coincida 1:1; desde el primer desajuste,
-     las palabras restantes se reparten el tramo que queda del chunk, todas con
-     `exact: false`. Así ninguna palabra se pierde y **el desfase no se propaga**.
+   - Números distintos → **con solo el conteo no se sabe dónde cayó la expansión**, así que
+     **ninguna** palabra del trozo puede afirmar exactitud: el tramo entero se reparte entre
+     todas las palabras, contiguo y sin solape, todas con `exact: false`. Así ninguna palabra
+     se pierde y el desfase no se propaga.
 4. `word_at(sample)` es búsqueda lineal (los capítulos son cortos; búsqueda binaria si algún
    día se mide que importa).
 
