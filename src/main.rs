@@ -36,6 +36,8 @@ fn main() -> anyhow::Result<()> {
                 readaloud::cli::voices::prepare(dir.as_deref(), &name)
             }
         },
-        Command::Play(_) => anyhow::bail!("no implementado"),
+        Command::Play(args) => {
+            readaloud::cli::play::run(&args.path, &args.voice, args.length_scale)
+        }
     }
 }

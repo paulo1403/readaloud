@@ -1,3 +1,4 @@
+pub mod play;
 pub mod say;
 pub mod script;
 pub mod voices;

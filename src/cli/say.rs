@@ -36,7 +36,9 @@ pub fn run(
 
 /// Elige de `dir` la voz llamada `name`, o la primera descubierta si es `None`.
 /// Un nombre que no existe es error, nunca cae en la primera.
-fn select(dir: &Path, name: Option<&str>) -> Result<voices::Voice, TtsError> {
+///
+/// `pub(crate)` porque `play` resuelve la voz por nombre con este mismo criterio.
+pub(crate) fn select(dir: &Path, name: Option<&str>) -> Result<voices::Voice, TtsError> {
     let available = voices::discover(dir);
     match name {
         Some(name) => available.into_iter().find(|v| v.name == name),

@@ -77,3 +77,40 @@ pub fn minimal_epub(dir: &Path) -> PathBuf {
         ],
     )
 }
+
+/// EPUB de un único capítulo lineal con el cuerpo XHTML dado. Controla cuántas
+/// frases tiene el libro sin tocar el fixture compartido.
+pub fn one_chapter_epub(dir: &Path, body: &str) -> PathBuf {
+    const OPF_UNA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">urn:uuid:fixture-una</dc:identifier>
+    <dc:title>Una</dc:title>
+    <dc:language>es</dc:language>
+  </metadata>
+  <manifest>
+    <item id="cap" href="cap.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="cap"/>
+  </spine>
+</package>
+"#;
+    let cap = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Uno</title></head>
+  <body>{body}</body>
+</html>
+"#
+    );
+    write_zip(
+        &dir.join("una.epub"),
+        &[
+            ("mimetype", "application/epub+zip"),
+            ("META-INF/container.xml", CONTAINER_XML),
+            ("OEBPS/content.opf", OPF_UNA),
+            ("OEBPS/cap.xhtml", &cap),
+        ],
+    )
+}

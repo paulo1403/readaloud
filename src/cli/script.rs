@@ -52,7 +52,7 @@ pub fn run_timeline(path: &Path, voice_onnx: &Path) -> anyhow::Result<String> {
 
     let mut chapters: Vec<ChapterTimeline> = Vec::with_capacity(book.chapters.len());
     for (index, chapter) in book.chapters.iter().enumerate() {
-        let words = chapter_words(&document.words, index as u32);
+        let words = &document.words[chapter_words(&document.words, index as u32)];
         let mut spans = Vec::new();
         let mut offset = 0usize;
         for group in grupos_de_frase(words) {
@@ -79,18 +79,21 @@ pub fn run_timeline(path: &Path, voice_onnx: &Path) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(&chapters)?)
 }
 
-/// Las palabras de un capítulo: contiguas en `words`, porque `doc::build` las
-/// añade capítulo a capítulo en orden.
-fn chapter_words(words: &[doc::Word], chapter: u32) -> &[doc::Word] {
+/// Rango de las palabras de un capítulo dentro de `words`: contiguas y en
+/// orden, porque `doc::build` las añade capítulo a capítulo.
+///
+/// `pub(crate)` porque `play` necesita el mismo agrupado por capítulos (los
+/// `paragraph` de `doc` se numeran por capítulo, no globalmente).
+pub(crate) fn chapter_words(words: &[doc::Word], chapter: u32) -> Range<usize> {
     let start = words.partition_point(|w| w.chapter < chapter);
     let end = words.partition_point(|w| w.chapter <= chapter);
-    &words[start..end]
+    start..end
 }
 
 /// Corta las palabras de un capítulo en frases sintetizables: cada párrafo se
 /// parte al alcanzar puntuación final o `MAX_FRASE` caracteres. Devuelve
 /// rangos sobre `words`.
-fn grupos_de_frase(words: &[doc::Word]) -> Vec<Range<usize>> {
+pub(crate) fn grupos_de_frase(words: &[doc::Word]) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut start = 0usize;
     let mut len = 0usize;
