@@ -691,17 +691,25 @@ Expected: FAIL — `timeline` no existe
 
 Algoritmo fijado (el implementador no puede adivinarlo):
 
-1. **Recorrer el protocolo documentado** de `libpiper`: leer N codepoints repetidos de
-   `phonemes` hasta un `0`, luego los N siguientes de `phoneme_ids` y los N siguientes de
-   `alignments`. Avanzar los tres iteradores juntos.
-2. **Agrupar en palabras de fonemas:** un codepoint igual a espacio (`' '`, U+0020) cierra
-   grupo. Cada grupo acumula la suma de sus alineaciones.
+1. **Recorrer los tres arrays en paralelo (lockstep)**, no el protocolo de `0`s: el
+   `PhonemeChunk` ya viene aplanado (ver el contrato documentado en `src/tts/mod.rs`).
+   Recorrer `i` sobre `(phonemes[i], phoneme_ids[i], alignments[i])` a la vez, y:
+   - **excluir** el par BOS inicial (`phonemes[0]` = `'^'` con id 1, `phonemes[1]` = `'^'`
+     con id 0) y el `'$'` final (id 2, EOS);
+   - tener en cuenta que **cada fonema real aparece dos veces** (su id real y el id de pad
+     `0`), así que la duración de un fonema está partida entre dos entradas.
+2. **Agrupar en palabras de fonemas:** la frontera de palabra es una **tirada** de espacios
+   (`' '`, U+0020), no un espacio suelto — el fonema espacio también emite su entrada real y
+   su entrada de pad, o sea dos espacios seguidos. Cada grupo acumula la suma de **todas** sus
+   alineaciones, incluidas las de pad (filtrar los pad partiría cada duración por la mitad).
+   Invariante disponible para test: `sum(alignments) == samples.len()`.
 3. **Casar con `words` en orden.**
    - Mismo número de grupos que de palabras → cada palabra es `exact: true`, con
      `start_sample` acumulado y `end_sample = start + suma`.
-   - Números distintos → casar el prefijo mientras coincida 1:1; desde el primer desajuste,
-     las palabras restantes se reparten el tramo que queda del chunk, todas con
-     `exact: false`. Así ninguna palabra se pierde y **el desfase no se propaga**.
+   - Números distintos → **con solo el conteo no se sabe dónde cayó la expansión**, así que
+     **ninguna** palabra del trozo puede afirmar exactitud: el tramo entero se reparte entre
+     todas las palabras, contiguo y sin solape, todas con `exact: false`. Así ninguna palabra
+     se pierde y el desfase no se propaga.
 4. `word_at(sample)` es búsqueda lineal (los capítulos son cortos; búsqueda binaria si algún
    día se mide que importa).
 
@@ -996,8 +1004,10 @@ Expected: 2 tests PASS
 - [ ] **Step 5: Verificación manual (M4)**
 
 Run: `cargo run -- play <tu-epub> --voice es_ES-davefx-medium`
-Expected: se oye el libro en voz alta; con `--length-scale 1.3` va más rápido sin cambiar el
-tono; Ctrl-C corta limpio.
+Expected: se oye el libro en voz alta a velocidad normal y sin cambio de tono; con
+`--length-scale 0.77` va **más rápido** sin subir el tono (`length_scale` de piper escala
+duración: **>1 es más lento, <1 es más rápido** — la formulación anterior de este paso estaba
+invertida y el implementador la corrigió midiendo); Ctrl-C corta limpio.
 
 - [ ] **Step 6: Commit**
 
