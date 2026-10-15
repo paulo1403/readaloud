@@ -88,6 +88,42 @@ fn chunk_dos_palabras_cuatro_grupos() -> PhonemeChunk {
     )
 }
 
+/// 4 palabras ("yo" "tengo" "42" "años") pero 6 grupos: "42" (posición 2)
+/// expande a "cuarenta y dos". Tramos: (0,6) (6,14) (14,30) (30,36) (36,49)
+/// (49,70); el total 70 == samples.len(). La expansión cae en medio.
+fn chunk_con_expansion_en_medio() -> PhonemeChunk {
+    chunk(
+        &[
+            ('^', 1, 0),
+            ('^', 0, 0),
+            ('y', 10, 4),
+            ('y', 0, 2), // "yo" 6
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('t', 11, 5),
+            ('t', 0, 3), // "tengo" 8
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('k', 12, 10),
+            ('k', 0, 6), // "cuarenta" 16
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('i', 13, 4),
+            ('i', 0, 2), // "y" 6
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('d', 14, 8),
+            ('d', 0, 5), // "dos" 13
+            (' ', 3, 0),
+            (' ', 0, 0),
+            ('a', 15, 15),
+            ('a', 0, 6), // "años" 21
+            ('$', 2, 0),
+        ],
+        70,
+    )
+}
+
 #[test]
 fn rangos_exactos_por_palabra() {
     let t = build(&chunk_de_dos_palabras(), &palabras(&["uno", "dos"]));
@@ -113,10 +149,24 @@ fn expansion_de_numeros_degrada_a_frase_sin_desfasar() {
     // el texto tiene 2 palabras ("son" "42") pero el chunk trae 4 grupos de fonemas
     let t = build(&chunk_dos_palabras_cuatro_grupos(), &palabras(&["son", "42"]));
     assert_eq!(t.spans.len(), 2);
-    assert!(t.spans.iter().any(|s| !s.exact), "lo no-1:1 debe quedar marcado");
+    assert!(t.spans.iter().all(|s| !s.exact), "un conteo distinto no permite afirmar exactitud");
     for w in t.spans.windows(2) {
         assert!(w[0].end_sample <= w[1].start_sample);
     }
+}
+
+#[test]
+fn expansion_en_medio_no_deja_palabras_exactas() {
+    // 4 palabras; el numero de la posicion 2 expande a varios grupos, luego hay 6
+    let words = palabras(&["yo", "tengo", "42", "años"]);
+    let t = build(&chunk_con_expansion_en_medio(), &words);
+    assert_eq!(t.spans.len(), 4);
+    assert!(t.spans.iter().all(|s| !s.exact), "un conteo distinto no permite afirmar exactitud");
+    for w in t.spans.windows(2) {
+        assert!(w[0].end_sample <= w[1].start_sample);
+    }
+    // y el ultimo no se pasa del total
+    assert!(t.spans.last().unwrap().end_sample <= 70);
 }
 
 #[test]

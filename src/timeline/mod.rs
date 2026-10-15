@@ -8,9 +8,16 @@
 //! la mitad).
 //!
 //! Si el número de grupos no coincide con el de palabras (p. ej. "42" →
-//! "cuarenta y dos"), el prefijo casa 1:1 y las palabras restantes se reparten
-//! el tramo que queda, marcadas `exact: false`: el desfase no se propaga y
-//! ninguna palabra se pierde.
+//! "cuarenta y dos"), **ninguna** palabra de ese trozo puede decir `exact:
+//! true`: no sabemos dónde cayó la expansión, así que no hay base para fiarse de
+//! ningún emparejamiento 1:1. El tramo entero se reparte entre todas las
+//! palabras, contiguo y sin solape, marcado `exact: false`. Se cambia precisión
+//! a nivel de palabra en los párrafos raros que contienen un token que expande
+//! —a cambio de no mentir nunca: un resaltado que se desfasa en silencio es peor
+//! que uno honesto y grueso. Mejora futura: un detector localizado de expansión
+//! (dígitos, abreviaturas, moneda, fechas) que conserve exacta la cabeza del
+//! trozo; tal detector es incompleto por naturaleza, y por eso **no** es el
+//! defecto.
 
 use crate::doc::Word;
 use crate::tts::PhonemeChunk;
@@ -79,9 +86,10 @@ fn grupos(phonemes: &[char], alignments: &[i32]) -> Vec<(usize, usize)> {
 
 /// Casa los grupos con las palabras.
 ///
-/// Mismo número → 1:1 exacto. Distinto → prefijo 1:1 (`min(g, w) - 1`) y las
-/// palabras restantes se reparten el tramo que va del primer grupo no casado al
-/// último, todas `exact: false`.
+/// Mismo número → 1:1 exacto (el único caso con emparejamiento conocido).
+/// Distinto → ninguna palabra afirma exactitud: el tramo completo se reparte
+/// entre todas las palabras, `exact: false`. No se intenta adivinar dónde
+/// quedó la cabeza exacta: la expansión puede caer en cualquier punto.
 fn casar(groups: &[(usize, usize)], words: &[Word]) -> Vec<Span> {
     let (g, w) = (groups.len(), words.len());
     let mut spans = Vec::with_capacity(w);
@@ -98,27 +106,16 @@ fn casar(groups: &[(usize, usize)], words: &[Word]) -> Vec<Span> {
         return spans;
     }
 
-    let k = g.min(w).saturating_sub(1);
-    for (i, &(s, e)) in groups.iter().take(k).enumerate() {
-        spans.push(Span {
-            word_id: words[i].id,
-            start_sample: s,
-            end_sample: e,
-            exact: true,
-        });
-    }
-
-    let (inicio, fin) = match groups.get(k).zip(groups.last()) {
-        Some((&(s, _), &(_, e))) => (s, e),
-        None => (0, 0),
+    let (inicio, fin) = match (groups.first(), groups.last()) {
+        (Some(&(s, _)), Some(&(_, e))) => (s, e),
+        _ => (0, 0),
     };
-    let restantes = w - k;
     let largo = fin.saturating_sub(inicio);
-    for t in 0..restantes {
+    for (t, word) in words.iter().enumerate() {
         spans.push(Span {
-            word_id: words[k + t].id,
-            start_sample: inicio + largo * t / restantes,
-            end_sample: inicio + largo * (t + 1) / restantes,
+            word_id: word.id,
+            start_sample: inicio + largo * t / w,
+            end_sample: inicio + largo * (t + 1) / w,
             exact: false,
         });
     }
