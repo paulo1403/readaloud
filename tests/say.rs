@@ -13,6 +13,13 @@ fn test_voice() -> Option<PathBuf> {
     std::env::var("READALOUD_TEST_VOICE").ok().map(Into::into)
 }
 
+/// `say` lee `voices::default_dir()`, no `READALOUD_TEST_VOICE`: el test de `say`
+/// se salta si ese directorio no tiene voces, para que la puerta y la búsqueda
+/// coincidan y no falle por el entorno.
+fn hay_voces_en_default_dir() -> bool {
+    !voices::discover(&voices::default_dir()).is_empty()
+}
+
 /// Copia la voz a un temporal como `voz.onnx` (+ su `.onnx.json`) para
 /// parchearla sin tocar el original.
 fn copia_temporal_de(voz: &Path) -> tempfile::TempDir {
@@ -53,7 +60,9 @@ fn prepare_marca_el_tensor_de_alineacion() {
 
 #[test]
 fn say_escribe_un_wav_no_vacio() {
-    let Some(_) = test_voice() else { return };
+    if !hay_voces_en_default_dir() {
+        return;
+    }
     let out = tempfile();
     cli::say::run("Hola mundo.", Some(&out), 1.0, None).unwrap();
     assert!(std::fs::metadata(&out).unwrap().len() > 44);

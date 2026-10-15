@@ -31,11 +31,18 @@ use super::{PhonemeChunk, TtsError, alignment, config_path};
 /// lo suelta al caer, de modo que nunca hay dos motores vivos ni llamadas
 /// solapadas.
 ///
-/// ponytail: un motor por proceso. El techo es que dos voces no cargan ni
-/// sintetizan en paralelo (irrelevante hoy: `say`/`play` usan una voz por
-/// proceso y el precache es de un solo hilo). Para paralelizar hará falta un
-/// libpiper que no termine espeak en cada `piper_free` (o un fonemizador
-/// thread-safe); entonces este lock se puede relajar a uno por motor.
+/// ponytail: **un motor por proceso**. El techo no es solo "no hay paralelismo";
+/// la consecuencia que importa es que un segundo `Engine::load` **se cuelga**:
+/// - si el primer motor vive en **otro hilo**, `load` espera para siempre a que
+///   ese motor se libere;
+/// - si vive en el **mismo hilo**, el `Mutex` no es reentrante y el segundo
+///   `load` se autobloquea sin remedio (no hay timeout ni error).
+///
+/// Por eso `play` y cualquier precache futuro deben cargar **un** motor y
+/// reutilizarlo con `synthesize`, nunca pedir otro mientras tengan uno vivo.
+/// Para tener varios motores hará falta un libpiper que no termine espeak en cada
+/// `piper_free` (o un fonemizador thread-safe); entonces este lock se puede
+/// relajar a uno por motor.
 fn ffi_lock() -> MutexGuard<'static, ()> {
     static FFI: Mutex<()> = Mutex::new(());
     FFI.lock().unwrap_or_else(|e| e.into_inner())
@@ -114,6 +121,9 @@ impl Engine {
     ///
     /// Si la voz no expone la salida de alineación (`w_ceil`), se parchea una
     /// copia en un fichero temporal y se carga esa. El original nunca se toca.
+    ///
+    /// **Bloquea** si ya existe otro `Engine` vivo en el proceso: solo puede
+    /// haber uno (ver `ffi_lock`). Carga un motor por proceso y reutilízalo.
     pub fn load(voice_onnx: &Path) -> Result<Engine, TtsError> {
         if !voice_onnx.is_file() {
             return Err(TtsError::VoiceNotFound);
