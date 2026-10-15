@@ -29,6 +29,7 @@ pub trait Sink {
 ///   Es la forma de que el FSM llegue a `Ended` sin dispositivo real.
 pub struct NullSink {
     played: Arc<AtomicUsize>,
+    stops: Arc<AtomicUsize>,
     immediate: bool,
 }
 
@@ -37,6 +38,7 @@ impl NullSink {
     pub fn new(counter: Arc<AtomicUsize>) -> Self {
         Self {
             played: counter,
+            stops: Arc::new(AtomicUsize::new(0)),
             immediate: false,
         }
     }
@@ -45,8 +47,15 @@ impl NullSink {
     pub fn instant() -> Self {
         Self {
             played: Arc::new(AtomicUsize::new(0)),
+            stops: Arc::new(AtomicUsize::new(0)),
             immediate: true,
         }
+    }
+
+    /// Handle al contador de `stop()`, para que un test observe las paradas
+    /// aunque el sink ya esté dentro del `Player`.
+    pub fn stop_counter(&self) -> Arc<AtomicUsize> {
+        self.stops.clone()
     }
 }
 
@@ -61,5 +70,7 @@ impl Sink for NullSink {
         self.played.load(Ordering::SeqCst)
     }
 
-    fn stop(&mut self) {}
+    fn stop(&mut self) {
+        self.stops.fetch_add(1, Ordering::SeqCst);
+    }
 }

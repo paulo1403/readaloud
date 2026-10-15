@@ -25,15 +25,33 @@ pub struct CpalSink {
 }
 
 impl CpalSink {
-    /// Abre el dispositivo de salida por defecto y arranca el stream.
-    pub fn new() -> Result<Self, PlayerError> {
+    /// Abre el dispositivo de salida por defecto a `rate` Hz.
+    ///
+    /// `rate` es la tasa del audio ya sintetizado (piper emite 22050 Hz; la
+    /// lleva el `sample_rate` del `.onnx.json` de la voz y el `PhonemeChunk`).
+    /// Se elige el primer formato del dispositivo que soporte esa tasa: el
+    /// stream debe correr a la tasa del contenido, o éste sonaría con el tono
+    /// y la velocidad cambiados. Si ningún formato la soporta, se devuelve
+    /// [`PlayerError::Rate`] en vez de desafinar en silencio.
+    pub fn new(rate: u32) -> Result<Self, PlayerError> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or(PlayerError::Device)?;
-        let supported = device
-            .default_output_config()
-            .map_err(|_| PlayerError::Config)?;
+
+        let configs: Vec<_> = device
+            .supported_output_configs()
+            .map_err(|_| PlayerError::Config)?
+            .collect();
+        let rangos: Vec<(u32, u32)> = configs
+            .iter()
+            .map(|c| (c.min_sample_rate(), c.max_sample_rate()))
+            .collect();
+        let idx = elegir(&rangos, rate).ok_or(PlayerError::Rate { rate })?;
+        let supported = configs[idx]
+            .try_with_sample_rate(rate)
+            .expect("elegir() ya comprobó que la tasa cabe en el rango");
+
         let format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
+        let config = supported.config();
 
         let played = Arc::new(AtomicUsize::new(0));
         let queue: Cola = Arc::new(Mutex::new(VecDeque::new()));
@@ -54,6 +72,16 @@ impl CpalSink {
             _stream: stream,
         })
     }
+}
+
+/// Índice del primer rango `(min, max)` que contiene `rate`, o `None`.
+///
+/// Pura a propósito: es la lógica de selección de tasa y se prueba sin
+/// dispositivo.
+fn elegir(rangos: &[(u32, u32)], rate: u32) -> Option<usize> {
+    rangos
+        .iter()
+        .position(|&(min, max)| min <= rate && rate <= max)
 }
 
 /// Construye el stream para el formato `T`: consume de la cola, replica cada
@@ -92,9 +120,9 @@ fn construir<T: SizedSample + FromSample<i16>>(
 }
 
 impl Sink for CpalSink {
-    // ponytail: sin remuestreo. Las frases se sintetizan ya a la tasa del
-    // dispositivo; si alguna trae otra `rate`, sonará con el tono cambiado.
-    // Añadir resample cuando `rate != device_rate` importe de verdad.
+    // ponytail: sin remuestreo. El stream corre a la tasa de `new(rate)`; una
+    // frase con otra `rate` sonaría con el tono cambiado. Añadir resample si
+    // alguna vez conviven frases de distinta tasa.
     fn write(&mut self, samples: &[i16], _rate: u32) {
         let mut cola = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         cola.extend(samples.iter().copied());
@@ -107,5 +135,23 @@ impl Sink for CpalSink {
     fn stop(&mut self) {
         let mut cola = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         cola.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La selección de tasa no toca el dispositivo: el stream debe correr a la
+    /// tasa del contenido (22050 Hz, la de piper), o el audio se desafina.
+    #[test]
+    fn elige_una_tasa_que_soporta_la_del_motor() {
+        // Ningún formato soporta 22050 → error, nunca reproducir a 44100/48000.
+        assert_eq!(elegir(&[(44100, 48000)], 22050), None);
+        // Un rango que lo contiene → se usa.
+        assert_eq!(elegir(&[(16000, 48000)], 22050), Some(0));
+        assert_eq!(elegir(&[(44100, 48000)], 44100), Some(0));
+        // Varios rangos: gana el primero que contiene la tasa.
+        assert_eq!(elegir(&[(44100, 48000), (22050, 22050)], 22050), Some(1));
     }
 }

@@ -51,6 +51,8 @@ pub enum PlayerError {
     Device,
     #[error("configuración de audio no soportada por el dispositivo")]
     Config,
+    #[error("el dispositivo no soporta ninguna salida a {rate} Hz")]
+    Rate { rate: u32 },
     #[error("no se pudo abrir el stream de audio")]
     Stream,
 }
@@ -156,13 +158,27 @@ impl Player {
     }
 
     /// Detiene la reproducción. `tick` devolverá `Paused` hasta `resume`.
+    ///
+    /// Rebobina el puntero de escritura a la posición real del sink y descarta
+    /// la cola no reproducida, de modo que el `played_samples()` que crezca
+    /// mientras la pausa dure no haga que `resume` dé la frase por terminada.
+    /// Al reanudar, el `tick` reescribe sólo el resto desde `offset`.
     pub fn pause(&mut self) {
-        if self.state == PlayerState::Playing {
-            self.state = PlayerState::Paused;
+        if self.state != PlayerState::Playing {
+            return;
         }
+        let local = self.sink.played_samples().saturating_sub(self.sink_base);
+        self.offset += local;
+        self.finished += local;
+        self.written = false;
+        self.sink.stop();
+        // Recaptura tras `stop()` para que `position_sample` siga cuadrando
+        // mientras esté en pausa.
+        self.sink_base = self.sink.played_samples();
+        self.state = PlayerState::Paused;
     }
 
-    /// Reanuda tras `pause`.
+    /// Reanuda tras `pause`. El siguiente `tick` reescribe el resto de la frase.
     pub fn resume(&mut self) {
         if self.state == PlayerState::Paused {
             self.state = PlayerState::Playing;
@@ -262,6 +278,40 @@ mod tests {
         assert_eq!(p.tick(), PlayerState::Paused);
         p.resume();
         assert_eq!(p.tick(), PlayerState::Playing);
+    }
+
+    #[test]
+    fn pausa_detiene_el_sink_y_reanuda_desde_el_offset() {
+        let jugado = Arc::new(AtomicUsize::new(0));
+        let sink = NullSink::new(jugado.clone());
+        let paradas = sink.stop_counter();
+        let mut p = Player::new(Box::new(sink));
+        // 100 samples en dos palabras: [0,50) y [50,100).
+        p.enqueue(sentencia_con_timeline(0, &[(0, 0, 50), (1, 50, 100)]));
+        assert_eq!(p.tick(), PlayerState::Playing);
+        jugado.store(40, Ordering::SeqCst); // el dispositivo va por el sample 40
+
+        p.pause();
+        assert_eq!(paradas.load(Ordering::SeqCst), 1, "pause debe detener el sink");
+        assert_eq!(p.tick(), PlayerState::Paused);
+        assert_eq!(p.position_sample(), 40, "la posición no salta al pausar");
+        assert_eq!(p.current_word(), Some(0), "sigue la palabra en la que íbamos");
+
+        // Sink defectuoso: sigue drenando durante la pausa.
+        jugado.store(100, Ordering::SeqCst);
+        assert_eq!(p.tick(), PlayerState::Paused);
+
+        p.resume();
+        assert_eq!(p.tick(), PlayerState::Playing, "resume no debe dar por Ended");
+        // La posición y la palabra siguen siendo las de la pausa: el FSM no
+        // saltó el resto, lo reescribe desde `offset`.
+        assert_eq!(p.position_sample(), 40);
+        assert_eq!(p.current_word(), Some(0));
+
+        // El resto (60 samples) suena y la frase termina una sola vez.
+        jugado.store(160, Ordering::SeqCst);
+        assert_eq!(p.tick(), PlayerState::Ended);
+        assert_eq!(p.position_sample(), 100);
     }
 
     #[test]
